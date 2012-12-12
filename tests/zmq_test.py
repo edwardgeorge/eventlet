@@ -393,6 +393,31 @@ got '%s'" % (zmq.ZMQError(errno), zmq.ZMQError(e.errno)))
         events = sock2.getsockopt(zmq.EVENTS)
         self.assertEqual(events & zmq.POLLIN, zmq.POLLIN)
 
+    @skip_unless(zmq_supported)
+    def test_resource_usage(self):
+        """Issue #128 ZeroMQ FD can be readable without being ready.
+
+        https://bitbucket.org/which_linden/eventlet/issue/128/zeromq-fd-can-be-readable-without-being
+
+        According to the ZeroMQ documentation, the socket file descriptor
+        can be readable without any pending messages. So we need to ensure
+        that Eventlet wraps around ZeroMQ sockets do not create busy loops.
+
+        A naive way to test it is to measure resource usage. This will require
+        some tuning to set appropriate acceptable limits.
+        """
+        context = zmq.Context()
+        sock = context.socket(zmq.PUB)
+        sock.bind_to_random_port("tcp://127.0.0.1")
+        r1 = resource.getrusage(resource.RUSAGE_SELF)
+        sleep(0.2)
+        r2 = resource.getrusage(resource.RUSAGE_SELF)
+        utime = r2.ru_utime - r1.ru_utime
+        stime = r2.ru_stime - r1.ru_stime
+        self.assertTrue(utime < 0.02)
+        self.assertTrue(stime < 0.02)
+        print "Resource usage: %.3f user %.3f sys" % (utime, stime)
+
 
 class TestQueueLock(LimitedTestCase):
     @skip_unless(zmq_supported)
