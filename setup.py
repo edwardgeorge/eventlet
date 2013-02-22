@@ -13,7 +13,7 @@ setup(
     url='http://eventlet.net',
     packages=find_packages(exclude=['tests', 'benchmarks']),
     install_requires=(
-        'greenlet >= 0.3',
+        'greenlet >= 0.4',
     ),
     zip_safe=False,
     long_description=open(

@@ -6,7 +6,7 @@ select = patcher.original('select')
 time = patcher.original('time')
 sleep = time.sleep
 
-from eventlet.support import get_errno, clear_sys_exc_info
+from eventlet.support import get_errno
 from eventlet.hubs.hub import BaseHub, READ, WRITE, noop, alarm_handler
 
 EXC_MASK = select.POLLERR | select.POLLHUP
@@ -107,7 +107,6 @@ class Hub(BaseHub):
                 raise
             except:
                 self.squelch_exception(fileno, sys.exc_info())
-                clear_sys_exc_info()
         
         if self.debug_blocking:
             self.block_detect_post()
