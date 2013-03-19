@@ -19,6 +19,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.from eventlet.support import greenlets as greenlet
+import sys
 
 from eventlet.support import greenlets as greenlet, BaseException
 from eventlet.hubs import get_hub
@@ -140,7 +141,8 @@ def with_timeout(seconds, function, *args, **kwds):
     try:
         try:
             return function(*args, **kwds)
-        except Timeout, ex:
+        except Timeout:
+            ex = sys.exc_info()[1]
             if ex is timeout and timeout_value is not _NONE:
                 return timeout_value
             raise

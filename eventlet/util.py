@@ -1,6 +1,9 @@
 import socket
 import warnings
 
+import six
+
+
 def g_log(*args):
     warnings.warn("eventlet.util.g_log is deprecated because "
                   "we're pretty sure no one uses it.  "
@@ -15,12 +18,12 @@ def g_log(*args):
             ident = 'greenlet-main'
         else:
             g_id = id(greenlet.getcurrent())
-            if g_id < 0:
+            if g_id < 0 and not six.PY3:
                 g_id += 1 + ((sys.maxint + 1) << 1)
             ident = '%08X' % (g_id,)
     else:
         ident = 'greenlet-%d' % (g_id,)
-    print >>sys.stderr, '[%s] %s' % (ident, ' '.join(map(str, args)))
+    six.print_('[%s] %s' % (ident, ' '.join(map(str, args))), file=sys.stderr)
 
 
 __original_socket__ = socket.socket

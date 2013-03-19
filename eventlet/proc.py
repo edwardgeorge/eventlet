@@ -205,7 +205,8 @@ def killall(procs, *throw_args, **kwargs):
         throw_args = (ProcExit, )
     wait = kwargs.pop('wait', False)
     if kwargs:
-        raise TypeError('Invalid keyword argument for proc.killall(): %s' % ', '.join(kwargs.keys()))
+        raise TypeError('Invalid keyword argument for proc.killall(): %s'
+                        % ', '.join(i for i in kwargs.keys()))
     for g in procs:
         if not g.dead:
             hubs.get_hub().schedule_call_global(0, g.throw, *throw_args)
@@ -401,7 +402,9 @@ class Source(object):
         self._start_send()
 
     def _start_send(self):
-        hubs.get_hub().schedule_call_global(0, self._do_send, self._value_links.items(), self._value_links)
+        hubs.get_hub().schedule_call_global(0, self._do_send,
+                                            list(self._value_links.items()),
+                                            self._value_links)
 
     def send_exception(self, *throw_args):
         assert not self.ready(), "%s has been fired already" % self
@@ -410,7 +413,9 @@ class Source(object):
         self._start_send_exception()
 
     def _start_send_exception(self):
-        hubs.get_hub().schedule_call_global(0, self._do_send, self._exception_links.items(), self._exception_links)
+        hubs.get_hub().schedule_call_global(0, self._do_send,
+                                            list(self._exception_links.items()),
+                                            self._exception_links)
 
     def _do_send(self, links, consult):
         while links:
@@ -526,7 +531,7 @@ class Proc(Source):
         klass = type(self).__name__
         return '<%s %s>' % (klass, ' '.join(self._repr_helper()))
 
-    def __nonzero__(self):
+    def __bool__(self):
         if self.ready():
             # with current _run this does not makes any difference
             # still, let keep it there
@@ -534,6 +539,8 @@ class Proc(Source):
         # otherwise bool(proc) is the same as bool(greenlet)
         if self.greenlet is not None:
             return bool(self.greenlet)
+
+    __nonzero__ = __bool__
 
     @property
     def dead(self):
@@ -651,8 +658,8 @@ class wrap_errors(object):
     def __call__(self, *args, **kwargs):
         try:
             return self.func(*args, **kwargs)
-        except self.errors, ex:
-            return ex
+        except self.errors:
+            return sys.exc_info()[1]
 
     def __str__(self):
         return str(self.func)

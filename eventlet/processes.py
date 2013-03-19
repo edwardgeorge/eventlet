@@ -9,6 +9,7 @@ import errno
 import os
 import popen2
 import signal
+import sys
 
 from eventlet import api
 from eventlet import pools
@@ -35,7 +36,8 @@ def cooperative_wait(pobj, check_interval=0.01):
             if status >= 0:
                 return status
             api.sleep(check_interval)
-    except OSError, e:
+    except OSError:
+        e = sys.exc_info()[1]
         if e.errno == errno.ECHILD:
             # no child process, this happens if the child process
             # already died and has been cleaned up, or if you just
@@ -109,8 +111,9 @@ class Process(object):
         try:
             written = self.child_stdin.write(stuff)
             self.child_stdin.flush()
-        except ValueError, e:
+        except ValueError:
             ## File was closed
+            e = sys.exc_info()[1]
             assert str(e) == 'I/O operation on closed file'
         if written == 0:
             self.dead_callback()

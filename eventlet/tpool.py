@@ -17,6 +17,8 @@ import imp
 import os
 import sys
 
+import six
+
 from eventlet import event
 from eventlet import greenio
 from eventlet import greenthread
@@ -125,7 +127,7 @@ def execute(meth,*args, **kwargs):
         if not QUIET:
             traceback.print_exception(c,e,tb)
             traceback.print_stack()
-        raise c,e,tb
+        six.reraise(c, e, tb)
     return rv
 
 
@@ -150,7 +152,7 @@ def proxy_call(autowrap, f, *args, **kwargs):
     else:
         return rv
 
-class Proxy(object):
+class Proxy(six.Iterator):
     """
     a simple proxy-wrapper of any object that comes with a
     methods-only interface, in order to forward every method
@@ -219,16 +221,17 @@ class Proxy(object):
         return self._obj.__str__()
     def __len__(self):
         return len(self._obj)
-    def __nonzero__(self):
+    def __bool__(self):
         return bool(self._obj)
+    __nonzero__ = __bool__
     def __iter__(self):
         it = iter(self._obj)
         if it == self._obj:
             return self
         else:
             return Proxy(it)
-    def next(self):
-        return proxy_call(self._autowrap, self._obj.next)
+    def __next__(self):
+        return proxy_call(self._autowrap, lambda: six.next(self._obj))
 
 
 _nthreads = int(os.environ.get('EVENTLET_THREADPOOL_SIZE', 20))
@@ -266,7 +269,7 @@ def setup():
         warnings.warn("Zero threads in tpool.  All tpool.execute calls will\
             execute in main thread.  Check the value of the environment \
             variable EVENTLET_THREADPOOL_SIZE.", RuntimeWarning)
-    for i in xrange(_nthreads):
+    for i in six.moves.xrange(_nthreads):
         reqq = Queue(maxsize=-1)
         t = threading.Thread(target=tworker, 
                              name="tpool_thread_%s" % i, 

@@ -1,6 +1,8 @@
 from collections import deque
 import sys
 
+import six
+
 from eventlet import event
 from eventlet import hubs
 from eventlet import timeout
@@ -253,7 +255,7 @@ def kill(g, *throw_args):
         # method never got called
         def just_raise(*a, **kw):
             if throw_args:
-                raise throw_args[0], throw_args[1], throw_args[2]
+                six.reraise(*throw_args)
             else:
                 raise greenlet.GreenletExit()
         g.run = just_raise

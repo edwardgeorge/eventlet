@@ -133,7 +133,7 @@ class BoundedSemaphore(Semaphore):
         The *blocking* argument is for consistency with :class:`CappedSemaphore`
         and is ignored"""
         if self.counter >= self.original_counter:
-            raise ValueError, "Semaphore released too many times"
+            raise ValueError("Semaphore released too many times")
         return super(BoundedSemaphore, self).release(blocking)
 
 class CappedSemaphore(object):

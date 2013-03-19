@@ -44,8 +44,8 @@ import sys
 import heapq
 import collections
 import traceback
-from Queue import Full, Empty
 
+import six
 
 _NONE = object()
 from eventlet.hubs import get_hub
@@ -54,6 +54,10 @@ from eventlet.event import Event
 from eventlet.timeout import Timeout
 
 __all__ = ['Queue', 'PriorityQueue', 'LifoQueue', 'LightQueue', 'Full', 'Empty']
+
+Full = six.moves.queue.Full
+Empty = six.moves.queue.Empty
+
 
 class Waiter(object):
     """A low level synchronization class.
@@ -90,8 +94,10 @@ class Waiter(object):
             waiting = ''
         return '<%s%s greenlet=%s>' % (type(self).__name__, waiting, self.greenlet)
 
-    def __nonzero__(self):
+    def __bool__(self):
         return self.greenlet is not None
+
+    __nonzero__ = __bool__
 
     @property
     def waiting(self):
