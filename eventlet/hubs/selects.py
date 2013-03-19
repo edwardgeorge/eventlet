@@ -17,10 +17,13 @@ class Hub(BaseHub):
         """ Iterate through fds, removing the ones that are bad per the
         operating system.
         """
-        for fd in self.listeners[READ].keys() + self.listeners[WRITE].keys():
+        keys = (list(self.listeners[READ].keys())
+                + list(self.listeners[WRITE].keys()))
+        for fd in keys:
             try:
                 select.select([fd], [], [], 0)
-            except select.error, e:
+            except select.error:
+                e = sys.exc_info()[1]
                 if get_errno(e) in BAD_SOCK:
                     self.remove_descriptor(fd)
 
@@ -32,8 +35,12 @@ class Hub(BaseHub):
                 time.sleep(seconds)
             return
         try:
-            r, w, er = select.select(readers.keys(), writers.keys(), readers.keys() + writers.keys(), seconds)
-        except select.error, e:
+            r, w, er = select.select(list(readers.keys()),
+                                     list(writers.keys()),
+                                     list(readers.keys()) + list(writers.keys()),
+                                     seconds)
+        except select.error:
+            e = sys.exc_info()[1]
             if get_errno(e) == errno.EINTR:
                 return
             elif get_errno(e) in BAD_SOCK:

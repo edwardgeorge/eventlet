@@ -1,4 +1,6 @@
 import errno
+import sys
+
 from eventlet.support import get_errno
 from eventlet import patcher
 time = patcher.original('time')
@@ -52,7 +54,8 @@ class Hub(poll.Hub):
                 self.register(fileno, new=True)
             else:
                 self.register(fileno, new=False)
-        except IOError, ex:    # ignore EEXIST, #80
+        except IOError:    # ignore EEXIST, #80
+            ex = sys.exc_info()[1]
             if get_errno(ex) != errno.EEXIST:
                 raise
         return listener
