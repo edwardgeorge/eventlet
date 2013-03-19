@@ -130,7 +130,7 @@ class WebSocketWSGI(object):
                 out += char
             elif char == " ":
                 spaces += 1
-        return int(out) / spaces
+        return int(out) // spaces
 
 class WebSocket(object):
     """A websocket object that handles the details of
