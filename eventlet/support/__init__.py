@@ -1,4 +1,6 @@
 import sys
+import six
+
 def get_errno(exc):
     """ Get the error code out of socket.error objects.
     socket.error in <2.5 does not have errno attribute
@@ -33,4 +35,4 @@ if sys.version_info[0]==2 and sys.version_info[1]<5:
         # that case "raise Timeout" fails with TypeError.
         pass
 else:
-    from __builtin__ import BaseException
+    from six.builtins import BaseException

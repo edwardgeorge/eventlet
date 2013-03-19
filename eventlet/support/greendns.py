@@ -120,9 +120,9 @@ def resolve(name):
     if rrset is None or time.time() > rrset.expiration:
         try:
             rrset = resolver.query(name)
-        except dns.exception.Timeout, e:
+        except dns.exception.Timeout:
             error = (socket.EAI_AGAIN, 'Lookup timed out')
-        except dns.exception.DNSException, e:
+        except dns.exception.DNSException:
             error = (socket.EAI_NODATA, 'No address associated with hostname')
         else:
             pass
@@ -147,9 +147,9 @@ def getaliases(host):
 
     try:
         answers = dns.resolver.query(host, 'cname')
-    except dns.exception.Timeout, e:
+    except dns.exception.Timeout:
         error = (socket.EAI_AGAIN, 'Lookup timed out')
-    except dns.exception.DNSException, e:
+    except dns.exception.DNSException:
         error = (socket.EAI_NODATA, 'No address associated with hostname')
     else:
         for record in answers:
@@ -227,15 +227,15 @@ def getnameinfo(sockaddr, flags):
 
     if is_ipv4_addr(host):
         try:
-            rrset =	resolver.query(
+            rrset = resolver.query(
                 dns.reversename.from_address(host), dns.rdatatype.PTR)
             if len(rrset) > 1:
                 raise socket.error('sockaddr resolved to multiple addresses')
             host = rrset[0].target.to_text(omit_final_dot=True)
-        except dns.exception.Timeout, e:
+        except dns.exception.Timeout:
             if flags & socket.NI_NAMEREQD:
                 raise socket.gaierror((socket.EAI_AGAIN, 'Lookup timed out'))
-        except dns.exception.DNSException, e:
+        except dns.exception.DNSException:
             if flags & socket.NI_NAMEREQD:
                 raise socket.gaierror(
                     (socket.EAI_NONAME, 'Name or service not known'))
@@ -246,9 +246,9 @@ def getnameinfo(sockaddr, flags):
                 raise socket.error('sockaddr resolved to multiple addresses')
             if flags & socket.NI_NUMERICHOST:
                 host = rrset[0].address
-        except dns.exception.Timeout, e:
+        except dns.exception.Timeout:
             raise socket.gaierror((socket.EAI_AGAIN, 'Lookup timed out'))
-        except dns.exception.DNSException, e:
+        except dns.exception.DNSException:
             raise socket.gaierror(
                 (socket.EAI_NODATA, 'No address associated with hostname'))
 
@@ -263,7 +263,7 @@ def is_ipv4_addr(host):
     dotted quad notation.
     """
     try:
-        d1, d2, d3, d4 = map(int, host.split('.'))
+        d1, d2, d3, d4 = list(map(int, host.split('.')))
     except (ValueError, AttributeError):
         return False
 
