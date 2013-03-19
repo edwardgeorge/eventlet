@@ -1,7 +1,8 @@
-import cPickle as Pickle
 import os
 import struct
 import sys
+
+import six
 
 from eventlet.processes import Process, DeadProcess
 from eventlet import pools
@@ -16,6 +17,9 @@ _g_debug_mode = False
 if _g_debug_mode:
     import traceback
     import tempfile
+
+pickle = six.moves.cPickle
+
 
 def pythonpath_sync():
     """
@@ -118,9 +122,9 @@ def _read_response(id, attribute, input, cp):
     try:
         str = _read_lp_hunk(input)
         _prnt(repr(str))
-        response = Pickle.loads(str)
-    except (AttributeError, DeadProcess, Pickle.UnpicklingError), e:
-        raise UnrecoverableError(e)
+        response = pickle.loads(str)
+    except (AttributeError, DeadProcess, pickle.UnpicklingError):
+        raise UnrecoverableError(sys.exc_info()[1])
     _prnt("response: %s" % response)
     if response[0] == 'value':
         return response[1]
@@ -142,7 +146,7 @@ def _write_lp_hunk(stream, hunk):
 
 def _write_request(param, output):
     _prnt("request: %s" % param)
-    str = Pickle.dumps(param)
+    str = pickle.dumps(param)
     _write_lp_hunk(output, str)
 
 def _is_local(attribute):
@@ -157,7 +161,7 @@ def _is_local(attribute):
 def _prnt(message):
     global _g_debug_mode
     if _g_debug_mode:
-        print message
+        six.print_(message)
 
 _g_logfile = None
 def _log(message):
@@ -332,7 +336,7 @@ class ObjectProxy(Proxy):
         # tack anything on to the return value here because str values are used as data.
         return self.__str__()
 
-    def __nonzero__(self):
+    def __bool__(self):
         # bool(obj) is another method that skips __getattribute__.
         # There's no good way to just pass
         # the method on, so we use a special message.
@@ -340,6 +344,8 @@ class ObjectProxy(Proxy):
         my_id = self.__local_dict['_id']
         request = Request('nonzero', {'id':my_id})
         return my_cp.make_request(request)
+
+    __nonzero__ = __bool__
 
     def __len__(self):
         # see description for __repr__, len(obj) is the same.
@@ -435,21 +441,21 @@ class Server(object):
     def handle_getattr(self, obj, req):
         try:
             return getattr(obj, req['attribute'])
-        except AttributeError, e:
+        except AttributeError:
             if hasattr(obj, "__getitem__"):
                 return obj[req['attribute']]
             else:
-                raise e
+                raise sys.exc_info()[1]
         #_log('getattr: %s' % str(response))
 
     def handle_setattr(self, obj, req):
         try:
             return setattr(obj, req['attribute'], req['value'])
-        except AttributeError, e:
+        except AttributeError:
             if hasattr(obj, "__setitem__"):
                 return obj.__setitem__(req['attribute'], req['value'])
             else:
-                raise e
+                raise sys.exc_info()[1]
 
     def handle_getitem(self, obj, req):
         return obj[req['key']]
@@ -472,11 +478,11 @@ class Server(object):
         #_log("calling %s " % (req['name']))
         try:
             fn = getattr(obj, req['name'])
-        except AttributeError, e:
+        except AttributeError:
             if hasattr(obj, "__setitem__"):
                 fn = obj[req['name']]
             else:
-                raise e
+                raise sys.exc_info()[1]
 
         return fn(*req['args'],**req['kwargs'])
 
@@ -513,7 +519,7 @@ class Server(object):
                         _log("Exiting normally")
                     sys.exit(0)
 
-                request = Pickle.loads(str_)
+                request = pickle.loads(str_)
                 _log("request: %s (%s)" % (request, self._objects))
                 req = request
                 id = None
@@ -524,7 +530,7 @@ class Server(object):
                         id = int(id)
                         obj = self._objects[id]
                     #_log("id, object: %d %s" % (id, obj))
-                except Exception, e:
+                except Exception:
                     #_log("Exception %s" % str(e))
                     pass
                 if obj is None or id is None:
@@ -538,7 +544,7 @@ class Server(object):
                 try:
                     handler = getattr(self, handler_name)
                 except AttributeError:
-                    raise BadRequest, request.action()
+                    raise BadRequest(request.action())
 
                 response = handler(obj, request)
 
@@ -548,7 +554,7 @@ class Server(object):
                     # have to handle these specially since we want to
                     # pickle up the actual value and not return a proxy
                     self.respond(['value', response])
-                elif callable(response):
+                elif six.callable(response):
                     #_log("callable %s" % response)
                     self.respond(['callable'])
                 elif self.is_value(response):
@@ -558,10 +564,10 @@ class Server(object):
                     #_log("objects: %s" % str(self._objects))
                     self.respond(['object', self._next_id])
                     self._next_id += 1
-            except (KeyboardInterrupt, SystemExit), e:
-                raise e
-            except Exception, e:
-                self.write_exception(e)
+            except (KeyboardInterrupt, SystemExit):
+                raise sys.exc_info()[1]
+            except Exception:
+                self.write_exception(sys.exc_info()[1])
 
     def is_value(self, value):
         """
@@ -571,12 +577,14 @@ class Server(object):
         :return: Returns ``True`` if *value* is a simple serializeable set of
             data.
         """
-        return type(value) in (str,unicode,int,float,long,bool,type(None))
+        testtypes = (six.string_types + six.integer_types
+                     + (float, bool, type(None)))
+        return isinstance(value, testtypes)
 
     def respond(self, body):
         _log("responding with: %s" % body)
         #_log("objects: %s" % self._objects)
-        s = Pickle.dumps(body)
+        s = pickle.dumps(body)
         _log(repr(s))
         _write_lp_hunk(self._out, s)
 
@@ -604,12 +612,12 @@ def raise_standard_error():
 
 # test function to make sure print doesn't break the wrapper
 def print_string(str):
-    print str
+    six.print_(str)
 
 # test function to make sure printing on stdout doesn't break the
 # wrapper
 def err_string(str):
-    print >>sys.stderr, str
+    six.print_(str, file=sys.stderr)
 
 def named(name):
     """Return an object given its name.
@@ -629,8 +637,9 @@ def named(name):
         try:
             obj = __import__(toimport)
             break
-        except ImportError, err:
+        except ImportError:
             # print 'Import error on %s: %s' % (toimport, err)  # debugging spam
+            err = sys.exc_info()[1]
             import_err_strings.append(err.__str__())
             toimport = '.'.join(toimport.split('.')[:-1])
     if obj is None:
