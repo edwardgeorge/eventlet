@@ -5,12 +5,18 @@ import time
 import traceback
 import warnings
 
-from eventlet.green import urllib
+import six
+
 from eventlet.green import socket
 from eventlet.green import BaseHTTPServer
 from eventlet import greenpool
 from eventlet import greenio
 from eventlet.support import get_errno
+
+try:
+    from urllib.parse import unquote
+except ImportError:
+    from urllib import unquote
 
 DEFAULT_MAX_SIMULTANEOUS_REQUESTS = 1024
 DEFAULT_MAX_HTTP_VERSION = 'HTTP/1.1'
@@ -43,12 +49,12 @@ BAD_SOCK = set((errno.EBADF, 10053))
 BROKEN_SOCK = set((errno.EPIPE, errno.ECONNRESET))
 
 # special flag return value for apps
-class _AlreadyHandled(object):
+class _AlreadyHandled(six.Iterator):
 
     def __iter__(self):
         return self
 
-    def next(self):
+    def __next__(self):
         raise StopIteration
 
 ALREADY_HANDLED = _AlreadyHandled()
@@ -231,7 +237,8 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
                 return
         except greenio.SSL.ZeroReturnError:
             self.raw_requestline = ''
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             if get_errno(e) not in BAD_SOCK:
                 raise
             self.raw_requestline = ''
@@ -277,7 +284,8 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
             self.server.outstanding_requests += 1
             try:
                 self.handle_one_response()
-            except socket.error, e:
+            except socket.error:
+                e = sys.exc_info()[1]
                 # Broken pipe, connection reset by peer
                 if get_errno(e) not in BROKEN_SOCK:
                     raise
@@ -348,7 +356,7 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
                 _writelines(towrite)
                 length[0] = length[0] + sum(map(len, towrite))
             except UnicodeEncodeError:
-                self.server.log_message("Encountered non-ascii unicode while attempting to write wsgi response: %r" % [x for x in towrite if isinstance(x, unicode)])
+                self.server.log_message("Encountered non-ascii unicode while attempting to write wsgi response: %r" % [x for x in towrite if isinstance(x, six.text_type)])
                 self.server.log_message(traceback.format_exc())
                 _writelines(
                     ["HTTP/1.1 500 Internal Server Error\r\n",
@@ -366,7 +374,7 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
                 try:
                     if headers_sent:
                         # Re-raise original exception if headers sent
-                        raise exc_info[0], exc_info[1], exc_info[2]
+                        six.reraise(*exc_info)
                 finally:
                     # Avoid dangling circular ref
                     exc_info = None
@@ -458,7 +466,7 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
 
         pq = self.path.split('?', 1)
         env['RAW_PATH_INFO'] = pq[0]
-        env['PATH_INFO'] = urllib.unquote(pq[0])
+        env['PATH_INFO'] = unquote(pq[0])
         if len(pq) > 1:
             env['QUERY_STRING'] = pq[1]
 
@@ -508,7 +516,8 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
     def finish(self):
         try:
             BaseHTTPServer.BaseHTTPRequestHandler.finish(self)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             # Broken pipe, connection reset by peer
             if get_errno(e) not in BROKEN_SOCK:
                 raise
@@ -674,7 +683,8 @@ def server(sock, site,
                         " call site to use GreenPool instead" % type(pool),
                         DeprecationWarning, stacklevel=2)
                     pool.execute_async(serv.process_request, client_socket)
-            except ACCEPT_EXCEPTIONS, e:
+            except ACCEPT_EXCEPTIONS:
+                e = sys.exc_info()[1]
                 if get_errno(e) not in ACCEPT_ERRNO:
                     raise
             except (KeyboardInterrupt, SystemExit):
@@ -688,6 +698,7 @@ def server(sock, site,
             # that far we might as well not bother closing sock at
             # all.
             sock.close()
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             if get_errno(e) not in BROKEN_SOCK:
                 traceback.print_exc()
