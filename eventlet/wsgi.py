@@ -571,7 +571,8 @@ class Server(BaseHTTPServer.HTTPServer):
             d.update(self.environ)
         return d
 
-    def process_request(self, (socket, address)):
+    def process_request(self, sockaddrpair):
+        socket, address = sockaddrpair
         proto = self.protocol(socket, address, self)
         proto.handle()
 
