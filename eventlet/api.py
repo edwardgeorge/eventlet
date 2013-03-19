@@ -191,7 +191,8 @@ def named(name):
         try:
             obj = __import__(toimport)
             break
-        except ImportError, err:
+        except ImportError:
+            err = sys.exc_info()[1]
             # print 'Import error on %s: %s' % (toimport, err)  # debugging spam
             import_err_strings.append(err.__str__())
             toimport = '.'.join(toimport.split('.')[:-1])

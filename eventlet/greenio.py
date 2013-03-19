@@ -11,6 +11,8 @@ import sys
 import time
 import warnings
 
+import six
+
 __all__ = ['GreenSocket', 'GreenPipe', 'shutdown_safe']
 
 CONNECT_ERR = set((errno.EINPROGRESS, errno.EALREADY, errno.EWOULDBLOCK))
@@ -54,7 +56,8 @@ def socket_accept(descriptor):
     """
     try:
         return descriptor.accept()
-    except socket.error, e:
+    except socket.error:
+        e = sys.exc_info()[1]
         if get_errno(e) == errno.EWOULDBLOCK:
             return None
         raise
@@ -123,7 +126,7 @@ class GreenSocket(object):
     """
     def __init__(self, family_or_realsock=socket.AF_INET, *args, **kwargs):
         should_set_nonblocking = kwargs.pop('set_nonblocking', True)
-        if isinstance(family_or_realsock, (int, long)):
+        if isinstance(family_or_realsock, six.integer_types):
             fd = _original_socket(family_or_realsock, *args, **kwargs)
         else:
             fd = family_or_realsock
@@ -212,7 +215,8 @@ class GreenSocket(object):
                 try:
                     trampoline(fd, write=True)
                     socket_checkerr(fd)
-                except socket.error, ex:
+                except socket.error:
+                    ex = sys.exc_info()[1]
                     return get_errno(ex)
         else:
             end = time.time() + self.gettimeout()
@@ -225,7 +229,8 @@ class GreenSocket(object):
                     trampoline(fd, write=True, timeout=end - time.time(),
                             timeout_exc=socket.timeout(errno.EAGAIN))
                     socket_checkerr(fd)
-                except socket.error, ex:
+                except socket.error:
+                    ex = sys.exc_info()[1]
                     return get_errno(ex)
 
     def dup(self, *args, **kw):
@@ -249,7 +254,8 @@ class GreenSocket(object):
         while True:
             try:
                 return fd.recv(buflen, flags)
-            except socket.error, e:
+            except socket.error:
+                e = sys.exc_info()[1]
                 if get_errno(e) in SOCKET_BLOCKING:
                     pass
                 elif get_errno(e) in SOCKET_CLOSED:
@@ -291,7 +297,8 @@ class GreenSocket(object):
         while 1:
             try:
                 total_sent += fd.send(data[total_sent:], flags)
-            except socket.error, e:
+            except socket.error:
+                e = sys.exc_info()[1]
                 if get_errno(e) not in SOCKET_BLOCKING:
                     raise
 
@@ -360,7 +367,8 @@ class _SocketDuckForFd(object):
             try:
                 data = os.read(self._fileno, buflen)
                 return data
-            except OSError, e:
+            except OSError:
+                e = sys.exc_info()[1]
                 if get_errno(e) != errno.EAGAIN:
                     raise IOError(*e.args)
             trampoline(self, read=True)
@@ -371,7 +379,8 @@ class _SocketDuckForFd(object):
         fileno = self._fileno
         try:
             total_sent = os_write(fileno, data)
-        except OSError, e:
+        except OSError:
+            e = sys.exc_info()[1]
             if get_errno(e) != errno.EAGAIN:
                 raise IOError(*e.args)
             total_sent = 0
@@ -379,7 +388,8 @@ class _SocketDuckForFd(object):
             trampoline(self, write=True)
             try:
                 total_sent += os_write(fileno, data[total_sent:])
-            except OSError, e:
+            except OSError:
+                e = sys.exc_info()[1]
                 if get_errno(e) != errno. EAGAIN:
                     raise IOError(*e.args)
 
@@ -411,13 +421,13 @@ class GreenPipe(_fileobject):
     - file argument can be descriptor, file name or file object.
     """
     def __init__(self, f, mode='r', bufsize=-1):
-        if not isinstance(f, (basestring, int, file)):
+        if not isinstance(f, six.string_types + six.integer_types + (file, )):
             raise TypeError('f(ile) should be int, str, unicode or file, not %r' % f)
 
-        if isinstance(f, basestring):
+        if isinstance(f, six.string_types):
             f = open(f, mode, 0)
 
-        if isinstance(f, int):
+        if isinstance(f, six.integer_types):
             fileno = f
             self._name = "<fd:%d>" % fileno
         else:
@@ -442,7 +452,7 @@ class GreenPipe(_fileobject):
             self.__class__.__name__,
             self.name,
             self.mode,
-            (id(self) < 0) and (sys.maxint + id(self)) or id(self))
+            ((id(self) < 0) and not six.PY3) and (sys.maxint + id(self)) or id(self))
 
     def close(self):
         super(GreenPipe, self).close()
@@ -463,7 +473,8 @@ class GreenPipe(_fileobject):
         n = len(data)
         try:
             buf[:n] = data
-        except TypeError, err:
+        except TypeError:
+            err = sys.exc_info()[1]
             if not isinstance(buf, array.array):
                 raise err
             buf[:n] = array.array('c', data)
@@ -484,7 +495,8 @@ class GreenPipe(_fileobject):
         self.flush()
         try:
             return os.lseek(self.fileno(), 0, 1) - self._get_readahead_len()
-        except OSError, e:
+        except OSError:
+            e = sys.exc_info()[1]
             raise IOError(*e.args)
 
     def seek(self, offset, whence=0):
@@ -495,7 +507,8 @@ class GreenPipe(_fileobject):
             offset -= self._get_readahead_len()
         try:
             rv = os.lseek(self.fileno(), offset, whence)
-        except OSError, e:
+        except OSError:
+            e = sys.exc_info()[1]
             raise IOError(*e.args)
         else:
             self._clear_readahead_buf()
@@ -508,7 +521,8 @@ class GreenPipe(_fileobject):
                 size = self.tell()
             try:
                 rv = os.ftruncate(self.fileno(), size)
-            except OSError, e:
+            except OSError:
+                e = sys.exc_info()[1]
                 raise IOError(*e.args)
             else:
                 self.seek(size) # move position&clear buffer
@@ -517,7 +531,8 @@ class GreenPipe(_fileobject):
     def isatty(self):
         try:
             return os.isatty(self.fileno())
-        except OSError, e:
+        except OSError:
+            e = sys.exc_info()[1]
             raise IOError(*e.args)
 
 
@@ -556,8 +571,9 @@ def shutdown_safe(sock):
         except TypeError:
             # SSL.Connection
             return sock.shutdown()
-    except socket.error, e:
+    except socket.error:
         # we don't care if the socket is already closed;
         # this will often be the case in an http server context
+        e = sys.exc_info()[1]
         if get_errno(e) != errno.ENOTCONN:
             raise

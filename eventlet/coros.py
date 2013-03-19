@@ -2,6 +2,8 @@ import collections
 import traceback
 import warnings
 
+import six
+
 import eventlet
 from eventlet import event as _event
 from eventlet import hubs
@@ -131,7 +133,7 @@ def CoroutinePool(*args, **kwargs):
     return Pool(*args, **kwargs)
 
 
-class Queue(object):
+class Queue(six.Iterator):
 
     def __init__(self):
         warnings.warn("coros.Queue is deprecated.  Please use "
@@ -140,8 +142,10 @@ class Queue(object):
         self.items = collections.deque()
         self._waiters = set()
 
-    def __nonzero__(self):
+    def __bool__(self):
         return len(self.items)>0
+
+    __nonzero__ = __bool__
 
     def __len__(self):
         return len(self.items)
@@ -199,7 +203,7 @@ class Queue(object):
     def __iter__(self):
         return self
 
-    def next(self):
+    def __next__(self):
         return self.wait()
 
 
@@ -214,8 +218,10 @@ class Channel(object):
         self._waiters = set()
         self._senders = set()
 
-    def __nonzero__(self):
+    def __bool__(self):
         return len(self.items)>0
+
+    __nonzero__ = __bool__
 
     def __len__(self):
         return len(self.items)

@@ -2,6 +2,8 @@ from collections import deque
 import sys
 import time
 
+import six
+
 from eventlet.pools import Pool
 from eventlet import timeout
 from eventlet import hubs
@@ -158,7 +160,7 @@ class BaseConnectionPool(Pool):
             pass # conn is None, or junk
         except:
             if not quiet:
-                print "Connection.close raised: %s" % (sys.exc_info()[1])
+                six.print_("Connection.close raised: %s" % (sys.exc_info()[1]))
 
     def get(self):
         conn = super(BaseConnectionPool, self).get()
@@ -210,7 +212,7 @@ class BaseConnectionPool(Pool):
             except:
                 # we don't care what the exception was, we just know the
                 # connection is dead
-                print "WARNING: connection.rollback raised: %s" % (sys.exc_info()[1])
+                six.print_("WARNING: connection.rollback raised: %s" % (sys.exc_info()[1]))
                 conn = None
 
         if conn is not None:
@@ -331,8 +333,10 @@ class PooledConnectionWrapper(GenericConnectionWrapper):
         super(PooledConnectionWrapper, self).__init__(baseconn)
         self._pool = pool
 
-    def __nonzero__(self):
+    def __bool__(self):
         return (hasattr(self, '_base') and bool(self._base))
+
+    __nonzero__ = __bool__
 
     def _destroy(self):
         self._pool = None

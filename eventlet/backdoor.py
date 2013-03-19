@@ -3,6 +3,8 @@ import sys
 import errno
 from code import InteractiveConsole
 
+import six
+
 import eventlet
 from eventlet import hubs
 from eventlet.support import greenlets, get_errno
@@ -67,7 +69,7 @@ class SocketConsole(greenlets.greenlet):
     def finalize(self):
         # restore the state of the socket
         self.desc = None
-        print "backdoor closed to %s:%s" % self.hostport
+        six.print_("backdoor closed to %s:%s" % self.hostport)
 
 
 def backdoor_server(sock, locals=None):
@@ -79,13 +81,14 @@ def backdoor_server(sock, locals=None):
     of the interpreters.  It can be convenient to stick important application
     variables in here.
     """
-    print "backdoor server listening on %s:%s" % sock.getsockname()
+    six.print_("backdoor server listening on %s:%s" % sock.getsockname())
     try:
         try:
             while True:
                 socketpair = sock.accept()
                 backdoor(socketpair, locals)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             # Broken pipe means it was shutdown
             if get_errno(e) != errno.EPIPE:
                 raise
@@ -93,14 +96,15 @@ def backdoor_server(sock, locals=None):
         sock.close()
 
 
-def backdoor((conn, addr), locals=None):
+def backdoor(connaddrpair, locals=None):
     """Sets up an interactive console on a socket with a single connected
     client.  This does not block the caller, as it spawns a new greenlet to
     handle the console.  This is meant to be called from within an accept loop
     (such as backdoor_server).
     """
+    conn, addr = connaddrpair
     host, port = addr
-    print "backdoor to %s:%s" % (host, port)
+    six.print_("backdoor to %s:%s" % (host, port))
     fl = conn.makefile("rw")
     console = SocketConsole(fl, (host, port), locals)
     hub = hubs.get_hub()

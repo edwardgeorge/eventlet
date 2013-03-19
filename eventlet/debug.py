@@ -7,6 +7,8 @@ import linecache
 import re
 import inspect
 
+import six
+
 __all__ = ['spew', 'unspew', 'format_hub_listeners', 'format_hub_timers', 
            'hub_listener_stacks', 'hub_exceptions', 'tpool_exceptions', 
            'hub_prevent_multiple_readers', 'hub_timer_stacks', 
@@ -40,7 +42,7 @@ class Spew(object):
                     line = 'Unknown code named [%s].  VM instruction #%d' % (
                         frame.f_code.co_name, frame.f_lasti)
             if self.trace_names is None or name in self.trace_names:
-                print '%s:%s: %s' % (name, lineno, line.rstrip())
+                six.print_('%s:%s: %s' % (name, lineno, line.rstrip()))
                 if not self.show_values:
                     return self
                 details = []
@@ -51,7 +53,7 @@ class Spew(object):
                     if tok in frame.f_locals:
                         details.append('%s=%r' % (tok, frame.f_locals[tok]))
                 if details:
-                    print "\t%s" % ' '.join(details)
+                    six.print_("\t%s" % ' '.join(details))
         return self
 
 
