@@ -1,5 +1,7 @@
 import collections
 
+from six.moves import xrange as range
+
 from eventlet import queue
 
 __all__ = ['Pool', 'TokenPool']
@@ -103,7 +105,7 @@ class Pool(object):
         if create is not None:
             self.create = create
 
-        for x in xrange(min_size):
+        for x in range(min_size):
             self.current_size += 1
             self.free_items.append(self.create())
 
