@@ -103,7 +103,7 @@ class Input(object):
             if length == 0:
                 return ""
 
-            if length < 0:
+            if length is not None and length < 0:
                 length = None
 
             if use_readline:
@@ -420,8 +420,9 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
             if hasattr(result, 'close'):
                 result.close()
             if (self.environ['eventlet.input'].chunked_input or
-                    self.environ['eventlet.input'].position \
-                    < self.environ['eventlet.input'].content_length):
+                (self.environ['eventlet.input'].content_length is not None and
+                 (self.environ['eventlet.input'].position
+                  < self.environ['eventlet.input'].content_length))):
                 ## Read and discard body if there was no pending 100-continue
                 if not self.environ['eventlet.input'].wfile:
                     while self.environ['eventlet.input'].read(MINIMUM_CHUNK_SIZE):
