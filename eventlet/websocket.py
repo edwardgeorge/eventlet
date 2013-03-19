@@ -3,11 +3,14 @@ import errno
 import string
 import struct
 from socket import error as SocketError
+import sys
 
 try:
     from hashlib import md5
 except ImportError: #pragma NO COVER
     from md5 import md5
+
+import six
 
 import eventlet
 from eventlet import semaphore
@@ -109,7 +112,8 @@ class WebSocketWSGI(object):
         sock.sendall(handshake_reply)
         try:
             self.handler(ws)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             if get_errno(e) not in ACCEPTABLE_CLIENT_ERRORS:
                 raise
         # Make sure we send the closing frame
@@ -175,10 +179,10 @@ class WebSocket(object):
 
         As per the dataframing section (5.3) for the websocket spec
         """
-        if isinstance(message, unicode):
+        if isinstance(message, six.text_type):
             message = message.encode('utf-8')
-        elif not isinstance(message, str):
-            message = str(message)
+        elif not isinstance(message, six.binary_type):
+            message = six.text_type(message).encode('utf-8')
         packed = "\x00%s\xFF" % message
         return packed
 
