@@ -154,7 +154,7 @@ class BaseHub(object):
         for listener in listeners:
             try:
                 listener.cb(fileno)
-            except Exception, e:
+            except Exception:
                 self.squelch_generic_exception(sys.exc_info())
 
     def ensure_greenlet(self):
@@ -192,7 +192,8 @@ class BaseHub(object):
         sys.stderr.flush()
         try:
             self.remove_descriptor(fileno)
-        except Exception, e:
+        except Exception:
+            e = sys.exc_info()[1]
             sys.stderr.write("Exception while removing descriptor! %r\n" % (e,))
             sys.stderr.flush()
 
@@ -353,10 +354,10 @@ class BaseHub(object):
     # for debugging:
 
     def get_readers(self):
-        return self.listeners[READ].values()
+        return list(self.listeners[READ].values())
 
     def get_writers(self):
-        return self.listeners[WRITE].values()
+        return list(self.listeners[WRITE].values())
 
     def get_timers_count(hub):
         return len(hub.timers) + len(hub.next_timers)
