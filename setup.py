@@ -14,6 +14,7 @@ setup(
     packages=find_packages(exclude=['tests', 'benchmarks']),
     install_requires=(
         'greenlet >= 0.3',
+        'six >= 1.3.0',
     ),
     zip_safe=False,
     long_description=open(
