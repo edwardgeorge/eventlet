@@ -1,5 +1,5 @@
 from eventlet.support import get_errno
-from eventlet.hubs import trampoline
+from eventlet.hubs import get_hub, trampoline
 BUFFER_SIZE = 4096
 
 import array
@@ -25,6 +25,11 @@ try:
 except AttributeError:
     def _fileobject(sock, *args, **kwargs):
         return _original_socket.makefile(sock, *args, **kwargs)
+
+
+def _remove_descriptor(fd):
+    hub = get_hub()
+    hub.schedule_call_global(0, hub.remove_descriptor, fd)
 
 
 def socket_connect(descriptor, address):
@@ -149,7 +154,6 @@ class GreenSocket(object):
         # Only `getsockopt` is required to fix that issue, others
         # are just premature optimization to save __getattr__ call.
         self.bind = fd.bind
-        self.close = fd.close
         self.fileno = fd.fileno
         self.getsockname = fd.getsockname
         self.getsockopt = fd.getsockopt
@@ -342,6 +346,15 @@ class GreenSocket(object):
     def gettimeout(self):
         return self._timeout
 
+    def close(self):
+        try:
+            fileno = self.fd.fileno()
+            _remove_descriptor(fileno)
+        except Exception:
+            pass
+        finally:
+            self.fd.close()
+
 
 class _SocketDuckForFd(object):
     """ Class implementing all socket method used by _fileobject in cooperative manner using low level os I/O calls."""
@@ -386,6 +399,7 @@ class _SocketDuckForFd(object):
     def __del__(self):
         try:
             os.close(self._fileno)
+            _remove_descriptor(self._fileno)
         except:
             # os.close may fail if __init__ didn't complete (i.e file dscriptor passed to popen was invalid
             pass
@@ -445,6 +459,10 @@ class GreenPipe(_fileobject):
             (id(self) < 0) and (sys.maxint + id(self)) or id(self))
 
     def close(self):
+        try:
+            _remove_descriptor(self.fileno())
+        except Exception:
+            pass
         super(GreenPipe, self).close()
         for method in ['fileno', 'flush', 'isatty', 'next', 'read', 'readinto',
                    'readline', 'readlines', 'seek', 'tell', 'truncate',
