@@ -1,13 +1,30 @@
+import imp
 import errno
+import new
+import os
+import shutil
 import struct
+import sys
+import tempfile
 
 import eventlet
 from eventlet import event
 from eventlet.green import httplib
 from eventlet.green import socket
+from eventlet.green import subprocess
 from eventlet import websocket
 
+from tests import skip_unless
 from tests.wsgi_test import _TestBase
+
+
+def autobahntestsuite_available(_f):
+    # don't actually import because it pulls in twisted
+    try:
+        imp.find_module('autobahntestsuite')
+    except ImportError:
+        return False
+    return True
 
 
 # demo app
@@ -29,6 +46,88 @@ def handle(ws):
         ws.close()
 
 wsapp = websocket.WebSocketWSGI(handle)
+
+
+class AutobahnTestCase(_TestBase):
+    TEST_TIMEOUT = None
+
+    def set_site(self):
+        self.site = wsapp
+
+    def _create_spec(self, version, port, cases=None):
+        cases = cases or ['*']
+        return {
+            "options": {"failByDrop": False, },
+            "enable-ssl": False,
+            "servers": [{"url": "ws://localhost:%d/echo" % (port, ),
+                         "agent": "eventlet-websocket",
+                         "options": {"version": version, }, }],
+            "cases": cases,
+            "exclude-cases": [],
+            "exclude-agent-cases": {}, }
+
+    def _perform_test(self, version, cases=None):
+        spec = self._create_spec(version, self.port, cases=cases)
+        new_mod = """
+import sys
+from autobahntestsuite.fuzzing import FuzzingClientFactory
+from twisted.internet import reactor
+
+class OurFactory(FuzzingClientFactory):
+    def createReports(self):
+        pass
+
+    def logCase(self, results):
+        caseid = results['id']
+        if results['behavior'] not in ('OK', 'INFORMATIONAL'):
+            reactor.stop()
+            sys.stderr.write("Case %%s behavior failed\\n" %% (caseid, ))
+        elif results['behaviorClose'] not in ('OK', 'INFORMATIONAL'):
+            reactor.stop()
+            sys.stderr.write("Case %%s close behavior failed\\n" %% (caseid, ))
+
+spec = %(spec)r
+OurFactory(spec)
+reactor.run()
+""" % {'spec': spec, }
+        testtmpdir = tempfile.mkdtemp('_websocket_test')
+        mod_path = os.path.join(testtmpdir, 'newmod.py')
+        try:
+            f = open(mod_path, 'w')
+            f.write(new_mod)
+            f.close()
+            print 'starting...'
+            p = subprocess.Popen(
+                [sys.executable, mod_path],
+                # using devnull because subprocess blocks on 2.7
+                # https://github.com/eventlet/eventlet/pull/24
+                stdout=open(os.devnull, 'wb'),
+                stderr=subprocess.PIPE)
+            stdout, stderr = p.communicate()
+            print stdout, stderr
+            assert not p.returncode, stderr
+        finally:
+            shutil.rmtree(testtmpdir)
+
+    spec = _create_spec(None, 18, 0)
+    script = ("from autobahntestsuite.fuzzing import FuzzingClientFactory;"
+              "spec = %r; f = FuzzingClientFactory(spec);"
+              "import sys; sys.stderr.write('\\n'.join(f.specCases));") % (spec, )
+    p = subprocess.Popen([sys.executable, '-c', script],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate()
+    assert not p.returncode, stderr
+    for version in (8, 13, 18):
+        for case in stderr.splitlines():
+            case = case.strip()
+            name = 'test_hybi%d_%s' % (version, case.replace('.', '_'), )
+            print name
+            locals()[name] = skip_unless(autobahntestsuite_available)(
+                new.function(
+                    (lambda self: self._perform_test(version, [case])).func_code,
+                    {'case': case, 'version': version, }, name))
+    del p, case, version, stdout, stderr, script, spec, name
+
 
 
 class TestWebSocket(_TestBase):
