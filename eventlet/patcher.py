@@ -233,6 +233,8 @@ def monkey_patch(**on):
         modules_to_patch += _green_socket_modules()
         already_patched['socket'] = True
     if on['thread'] and not already_patched.get('thread'):
+        thread_started = ('threading' in sys.modules and
+                          __import__('threading').active_count() > 1)
         modules_to_patch += _green_thread_modules()
         already_patched['thread'] = True
     if on['time'] and not already_patched.get('time'):
@@ -258,6 +260,9 @@ def monkey_patch(**on):
     try:
         for name, mod in modules_to_patch:
             orig_mod = sys.modules.get(name)
+            if name == 'threading' and thread_started:
+                sys.modules['threading'] = mod
+                continue
             if orig_mod is None:
                 orig_mod = __import__(name)
             for attr_name in mod.__patched__:
