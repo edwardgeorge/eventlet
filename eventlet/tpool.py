@@ -1,92 +1,126 @@
-# Copyright (c) 2007-2009, Linden Research, Inc.
-# Copyright (c) 2007, IBM Corp.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import imp
 import os
 import sys
 
-from eventlet import event
 from eventlet import greenio
-from eventlet import greenthread
-from eventlet import patcher
+from eventlet import event
+from eventlet import hubs
 from eventlet import timeout
+from eventlet import patcher
+
 threading = patcher.original('threading')
 Queue_module = patcher.original('Queue')
 Queue = Queue_module.Queue
 Empty = Queue_module.Empty
 
-__all__ = ['execute', 'Proxy', 'killall']
-
-QUIET=True
-
-_rfile = _wfile = None
-
-_bytetosend = ' '.encode()
-
-def _signal_t2e():
-    _wfile.write(_bytetosend)
-    _wfile.flush()
-
-_reqq = None
-_rspq = None
-
-def tpool_trampoline():
-    global _rspq
-    while(True):
-        try:
-            _c = _rfile.read(1)
-            assert _c
-        except ValueError:
-            break  # will be raised when pipe is closed
-        while not _rspq.empty():
-            try:
-                (e,rv) = _rspq.get(block=False)
-                e.send(rv)
-                e = rv = None
-            except Empty:
-                pass
-
-
+DEFAULT_SIZE = int(os.environ.get('EVENTLET_THREADPOOL_SIZE', 20))
 SYS_EXCS = (KeyboardInterrupt, SystemExit)
 EXC_CLASSES = (Exception, timeout.Timeout)
 
-def tworker():
-    global _rspq
-    while(True):
-        try:
-            msg = _reqq.get()
-        except AttributeError:
-            return # can't get anything off of a dud queue
-        if msg is None:
-            return
-        (e,meth,args,kwargs) = msg
-        rv = None
-        try:
-            rv = meth(*args,**kwargs)
-        except SYS_EXCS:
-            raise
-        except EXC_CLASSES:
-            rv = sys.exc_info()
-        # test_leakage_from_tracebacks verifies that the use of
-        # exc_info does not lead to memory leaks
-        _rspq.put((e,rv))
-        msg = meth = args = kwargs = e = rv = None
-        _signal_t2e()
+_threadpool = None
 
 
-def execute(meth,*args, **kwargs):
+class ThreadPool(object):
+    def __init__(self, size=DEFAULT_SIZE):
+        assert size >= 0, "Can't specify negative number of threads"
+        if size == 0:
+            import warnings
+            warnings.warn("Zero threads in tpool.  All tpool.execute calls"
+                          " will execute in main thread."
+                          "  Check the value of the environment variable"
+                          " EVENTLET_THREADPOOL_SIZE.", RuntimeWarning)
+        self.size = size
+        self.threads = set()
+        self._signal = sig = greenio._IOSignal()
+        self._hub = hub = hubs.get_hub()
+        self._listener = hub.add(hub.READ, sig.r.fileno(),
+                                 self._handle_response)
+        self.setup()
+
+    def setup(self):
+        self.request_queue = reqq = Queue(maxsize=-1)
+        self.response_queue = rspq = Queue(maxsize=-1)
+        for i in xrange(self.size):
+            t = threading.Thread(target=self._thread_main,
+                                 args=(reqq, rspq, self._signal.send),
+                                 name="tpool_thread_%d" % (i, ))
+            t.daemon = True
+            t.start()
+            self.threads.add(t)
+        self._is_setup = True
+
+    def _handle_response(self, fileno):
+        self._signal.drain()
+        rspq = self.response_queue
+        while not rspq.empty():
+            try:
+                (e, rv) = rspq.get(block=False)
+                if rv[0]:
+                    e.send_exception(*rv[1])
+                else:
+                    e.send(rv[1])
+                e = rv = None
+            except Empty:
+                return
+
+    def _thread_main(self, requestq, responseq, signalresp):
+        while True:
+            try:
+                msg = requestq.get()
+            except AttributeError:
+                return  # can't get anything off of a dud queue
+            if msg is None:
+                return
+            (e, meth, args, kwargs) = msg
+            rv = None
+            try:
+                rv = (False, meth(*args, **kwargs))
+            except SYS_EXCS:
+                raise
+            except EXC_CLASSES:
+                rv = (True, sys.exc_info())
+            # test_leakage_from_tracebacks verifies that the use of
+            # exc_info does not lead to memory leaks
+            responseq.put((e, rv))
+            msg = meth = args = kwargs = e = rv = None
+            signalresp()
+
+    def execute(self, func, *args, **kwargs):
+        # if already in tpool, don't recurse into the tpool
+        # also, call functions directly if we're inside an import lock, because
+        # if meth does any importing (sadly common), it will hang
+        if not self._is_setup:
+            self.setup()
+        my_thread = threading.currentThread()
+        if my_thread in self.threads or imp.lock_held() or self.size == 0:
+            return func(*args, **kwargs)
+
+        e = event.Event()
+        self.request_queue.put((e, func, args, kwargs))
+        # raises exception if sent
+        return e.wait()
+
+    def killall(self):
+        threads = self.threads
+        reqq = self.request_queue
+        for thr in threads:
+            reqq.put(None)
+        for thr in threads:
+            thr.join()
+        threads.clear()
+        self._is_setup = False
+
+
+def setup():
+    # deprecated
+    global _threadpool
+    if _threadpool is None:
+        _threadpool = ThreadPool()
+    if not _threadpool._is_setup:
+        _threadpool.setup()
+
+
+def execute(func, *args, **kwargs):
     """
     Execute *meth* in a Python thread, blocking the current coroutine/
     greenthread until the method completes.
@@ -97,28 +131,18 @@ def execute(meth,*args, **kwargs):
     cooperate with green threads by sticking them in native threads, at the cost
     of some overhead.
     """
-    setup()
-    # if already in tpool, don't recurse into the tpool
-    # also, call functions directly if we're inside an import lock, because
-    # if meth does any importing (sadly common), it will hang
-    my_thread = threading.currentThread()
-    if my_thread in _threads or imp.lock_held() or _nthreads == 0:
-        return meth(*args, **kwargs)
+    global _threadpool
+    if _threadpool is None:
+        _threadpool = ThreadPool()
+    return _threadpool.execute(func, *args, **kwargs)
 
-    e = event.Event()
-    _reqq.put((e,meth,args,kwargs))
 
-    rv = e.wait()
-    if isinstance(rv,tuple) \
-      and len(rv) == 3 \
-      and isinstance(rv[1],EXC_CLASSES):
-        import traceback
-        (c,e,tb) = rv
-        if not QUIET:
-            traceback.print_exception(c,e,tb)
-            traceback.print_stack()
-        raise c,e,tb
-    return rv
+def killall():
+    global _threadpool
+    if not _threadpool:
+        return
+    _threadpool.killall()
+    _threadpool = None
 
 
 def proxy_call(autowrap, f, *args, **kwargs):
@@ -133,14 +157,15 @@ def proxy_call(autowrap, f, *args, **kwargs):
     that don't need to be called in a separate thread, but which return objects
     that should be Proxy wrapped.
     """
-    if kwargs.pop('nonblocking',False):
+    if kwargs.pop('nonblocking', False):
         rv = f(*args, **kwargs)
     else:
-        rv = execute(f,*args,**kwargs)
+        rv = execute(f, *args, **kwargs)
     if isinstance(rv, autowrap):
         return Proxy(rv, autowrap)
     else:
         return rv
+
 
 class Proxy(object):
     """
@@ -163,21 +188,23 @@ class Proxy(object):
     of strings, which represent the names of attributes that should be
     wrapped in Proxy objects when accessed.
     """
-    def __init__(self, obj,autowrap=(), autowrap_names=()):
+    def __init__(self, obj, autowrap=(), autowrap_names=()):
         self._obj = obj
         self._autowrap = autowrap
         self._autowrap_names = autowrap_names
 
-    def __getattr__(self,attr_name):
-        f = getattr(self._obj,attr_name)
+    def __getattr__(self, attr_name):
+        f = getattr(self._obj, attr_name)
         if not hasattr(f, '__call__'):
             if (isinstance(f, self._autowrap) or
-                attr_name in self._autowrap_names):
+                    attr_name in self._autowrap_names):
                 return Proxy(f, self._autowrap)
             return f
+
         def doit(*args, **kwargs):
             result = proxy_call(self._autowrap, f, *args, **kwargs)
-            if attr_name in self._autowrap_names and not isinstance(result, Proxy):
+            if (attr_name in self._autowrap_names
+                    and not isinstance(result, Proxy)):
                 return Proxy(result)
             return result
         return doit
@@ -186,7 +213,7 @@ class Proxy(object):
     # doesn't use getattr to retrieve and therefore have to be defined
     # explicitly
     def __getitem__(self, key):
-        return proxy_call(self._autowrap, self._obj.__getitem__, key)    
+        return proxy_call(self._autowrap, self._obj.__getitem__, key)
     def __setitem__(self, key, value):
         return proxy_call(self._autowrap, self._obj.__setitem__, key, value)
     def __deepcopy__(self, memo=None):
@@ -221,72 +248,3 @@ class Proxy(object):
             return Proxy(it)
     def next(self):
         return proxy_call(self._autowrap, self._obj.next)
-
-
-_nthreads = int(os.environ.get('EVENTLET_THREADPOOL_SIZE', 20))
-_threads = []
-_coro = None
-_setup_already = False
-def setup():
-    global _rfile, _wfile, _threads, _coro, _setup_already, _rspq, _reqq
-    if _setup_already:
-        return
-    else:
-        _setup_already = True
-    try:
-        _rpipe, _wpipe = os.pipe()
-        _wfile = greenio.GreenPipe(_wpipe, 'wb', 0)
-        _rfile = greenio.GreenPipe(_rpipe, 'rb', 0)
-    except (ImportError, NotImplementedError):
-        # This is Windows compatibility -- use a socket instead of a pipe because
-        # pipes don't really exist on Windows.
-        import socket
-        from eventlet import util
-        sock = util.__original_socket__(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('localhost', 0))
-        sock.listen(50)
-        csock = util.__original_socket__(socket.AF_INET, socket.SOCK_STREAM)
-        csock.connect(('localhost', sock.getsockname()[1]))
-        nsock, addr = sock.accept()
-        _rfile = greenio.GreenSocket(csock).makefile('rb', 0)
-        _wfile = nsock.makefile('wb',0)
-
-    _reqq = Queue(maxsize=-1)
-    _rspq = Queue(maxsize=-1)
-    assert _nthreads >= 0, "Can't specify negative number of threads"
-    if _nthreads == 0:
-        import warnings
-        warnings.warn("Zero threads in tpool.  All tpool.execute calls will\
-            execute in main thread.  Check the value of the environment \
-            variable EVENTLET_THREADPOOL_SIZE.", RuntimeWarning)
-    for i in xrange(_nthreads):
-        t = threading.Thread(target=tworker, 
-                             name="tpool_thread_%s" % i)
-        t.setDaemon(True)
-        t.start()
-        _threads.append(t)
-
-    _coro = greenthread.spawn_n(tpool_trampoline)
-
-
-def killall():
-    global _setup_already, _rspq, _rfile, _wfile
-    if not _setup_already:
-        return
-    for thr in _threads:
-        _reqq.put(None)
-    for thr in _threads:
-        thr.join()
-    del _threads[:]
-    if _coro is not None:
-        greenthread.kill(_coro)
-    _rfile.close()
-    _wfile.close()
-    _rfile = None
-    _wfile = None
-    _rspq = None
-    _setup_already = False
-
-def set_num_threads(nthreads):
-    global _nthreads
-    _nthreads = nthreads
