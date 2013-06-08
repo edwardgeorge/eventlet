@@ -1,4 +1,6 @@
+from collections import deque
 import imp
+import itertools
 import os
 import sys
 
@@ -35,19 +37,32 @@ class ThreadPool(object):
         self._hub = hub = hubs.get_hub()
         self._listener = hub.add(hub.READ, sig.r.fileno(),
                                  self._handle_response)
+        self._is_setup = False
         self.setup()
 
     def setup(self):
-        self.request_queue = reqq = Queue(maxsize=-1)
-        self.response_queue = rspq = Queue(maxsize=-1)
-        for i in xrange(self.size):
+        if self._is_setup:
+            return
+        self.request_queue = Queue(maxsize=-1)
+        self.response_queue = Queue(maxsize=-1)
+        self._start_threads(self.size)
+        self._is_setup = True
+
+    def _start_threads(self, size):
+        reqq, rspq = self.request_queue, self.response_queue
+        for i in xrange(size):
             t = threading.Thread(target=self._thread_main,
                                  args=(reqq, rspq, self._signal.send),
                                  name="tpool_thread_%d" % (i, ))
             t.daemon = True
             t.start()
             self.threads.add(t)
-        self._is_setup = True
+
+    def resize(self, newsize):
+        if newsize > self.size:
+            self._start_threads(newsize - self.size)
+        for i in xrange(0, newsize - self.size):
+            self.request_queue.put(None)
 
     def _handle_response(self, fileno):
         self._signal.drain()
@@ -110,14 +125,27 @@ class ThreadPool(object):
         threads.clear()
         self._is_setup = False
 
+    def starmap(self, function, iterable):
+        if not self._is_setup:
+            self.setup()
+        events = deque()
+        for args in iterable:
+            e = event.Event()
+            self.request_queue.put((e, function, args, {}))
+            events.append(e)
+        while events:
+            yield events.popleft().wait()
+
+    def imap(self, function, *iterables):
+        return self.starmap(function, itertools.izip(*iterables))
+
 
 def setup():
     # deprecated
     global _threadpool
     if _threadpool is None:
         _threadpool = ThreadPool()
-    if not _threadpool._is_setup:
-        _threadpool.setup()
+    _threadpool.setup()
 
 
 def execute(func, *args, **kwargs):

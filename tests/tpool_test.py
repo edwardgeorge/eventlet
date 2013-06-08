@@ -276,6 +276,27 @@ class TestTpool(LimitedTestCase):
             raise eventlet.Timeout()
         self.assertRaises(eventlet.Timeout, tpool.execute, raise_timeout)
 
+    @skip_with_pyevent
+    def test_starmap(self):
+        tpool.execute(noop)
+        len_ = 50
+        expected = [i * 2 for i in xrange(len_)]
+        input_ = ((i, ) for i in xrange(len_))
+        results = tpool._threadpool.starmap(lambda i: i * 2, input_)
+        assert expected == list(results)
+        tpool.killall()
+
+    @skip_with_pyevent
+    def test_imap(self):
+        tpool.execute(noop)
+        results = tpool._threadpool.imap(
+            lambda i, j: i + j,
+            xrange(5),
+            reversed(xrange(5)))
+        assert list(results) == [4] * 5
+        tpool.killall()
+
+
 class TpoolLongTests(LimitedTestCase):
     TEST_TIMEOUT=60
     @skip_with_pyevent
